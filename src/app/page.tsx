@@ -728,19 +728,39 @@ export default function DashboardPage() {
 
                         {/* Lampiran */}
                         <td
-                          className="py-3 px-3 text-center whitespace-nowrap"
+                          className="py-2 px-3 text-center whitespace-nowrap"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {log?.attachment_url ? (
-                            <a
-                              href={log.attachment_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-semibold text-[11px] transition"
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                              Bukti
-                            </a>
+                            log.attachment_url
+                              .toLowerCase()
+                              .split("?")[0]
+                              .endsWith(".pdf") ? (
+                              <a
+                                href={log.attachment_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-semibold text-[11px] transition"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                PDF
+                              </a>
+                            ) : (
+                              <a
+                                href={log.attachment_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-block group"
+                                title="Klik untuk perbesar gambar bukti"
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={log.attachment_url}
+                                  alt={`Bukti ${dateStr}`}
+                                  className="w-16 h-12 object-cover rounded-lg border border-slate-200 group-hover:ring-2 group-hover:ring-indigo-500 transition mx-auto"
+                                />
+                              </a>
+                            )
                           ) : (
                             <span className="text-slate-300">-</span>
                           )}

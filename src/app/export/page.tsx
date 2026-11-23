@@ -419,6 +419,9 @@ function ExportContent() {
                   <th className="border border-slate-300 py-2 px-2.5 font-bold">
                     Daily Activity
                   </th>
+                  <th className="border border-slate-300 py-2 px-2 font-bold text-center w-28">
+                    Bukti Lampiran
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -447,6 +450,11 @@ function ExportContent() {
                     aktualCell = "OFF";
                     keluarCell = "OFF";
                   }
+
+                  const isPdf = log?.attachment_url
+                    ?.toLowerCase()
+                    .split("?")[0]
+                    .endsWith(".pdf");
 
                   return (
                     <tr
@@ -481,6 +489,24 @@ function ExportContent() {
                       <td className="border border-slate-300 py-1.5 px-2.5 whitespace-pre-line">
                         {log?.daily_activity ||
                           (isWeekend && !log ? "WEEKEND" : "-")}
+                      </td>
+                      <td className="border border-slate-300 py-1.5 px-2 text-center">
+                        {log?.attachment_url ? (
+                          isPdf ? (
+                            <span className="text-[10px] font-semibold text-slate-700">
+                              Dokumen PDF
+                            </span>
+                          ) : (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              src={log.attachment_url}
+                              alt={`Bukti ${dateStr}`}
+                              className="w-24 h-16 object-cover rounded border border-slate-200 mx-auto"
+                            />
+                          )
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
                       </td>
                     </tr>
                   );

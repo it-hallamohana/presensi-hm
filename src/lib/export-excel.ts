@@ -2,6 +2,61 @@ import ExcelJS from "exceljs";
 import { AttProfile, DayRecapRow } from "@/types/attendance";
 import { formatTimeShort, getRowKeterangan } from "@/lib/attendance-utils";
 
+async function fetchImageForExcel(url: string): Promise<{
+  buffer: ArrayBuffer;
+  extension: "jpeg" | "png";
+} | null> {
+  try {
+    const cleanUrl = url.split("?")[0].toLowerCase();
+    if (cleanUrl.endsWith(".pdf")) return null;
+
+    const response = await fetch(url);
+    if (!response.ok) return null;
+
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("pdf")) return null;
+
+    const blob = await response.blob();
+
+    // Convert any image (including webp/png/jpg) to clean PNG or JPEG via canvas if in browser,
+    // or directly use buffer if already png/jpeg
+    if (contentType.includes("png") || cleanUrl.endsWith(".png")) {
+      const buffer = await blob.arrayBuffer();
+      return { buffer, extension: "png" };
+    }
+
+    if (
+      contentType.includes("jpeg") ||
+      contentType.includes("jpg") ||
+      cleanUrl.endsWith(".jpg") ||
+      cleanUrl.endsWith(".jpeg")
+    ) {
+      const buffer = await blob.arrayBuffer();
+      return { buffer, extension: "jpeg" };
+    }
+
+    // Fallback: convert via HTML5 Canvas to JPEG so ExcelJS never fails on WebP
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0);
+
+    const jpegBlob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.85)
+    );
+    if (!jpegBlob) return null;
+    const buffer = await jpegBlob.arrayBuffer();
+    return { buffer, extension: "jpeg" };
+  } catch {
+    return null;
+  }
+}
+
 export async function exportAttendanceToExcel(params: {
   rows: DayRecapRow[];
   profile: AttProfile;
@@ -17,6 +72,13 @@ export async function exportAttendanceToExcel(params: {
 
   const sheet = workbook.addWorksheet("Rekap Presensi", {
     views: [{ state: "frozen", ySplit: 4 }],
+    pageSetup: {
+      paperSize: 9, // A4
+      orientation: "landscape",
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+    },
   });
 
   // Title Row
@@ -44,12 +106,12 @@ export async function exportAttendanceToExcel(params: {
     "Jam Keluar",
     "Keterangan",
     "Daily Activity",
-    "Link Lampiran",
+    "Bukti Lampiran",
   ];
 
   const headerRow = sheet.getRow(4);
   headerRow.values = headers;
-  headerRow.height = 24;
+  headerRow.height = 26;
 
   headerRow.eachCell((cell) => {
     cell.font = { bold: true, size: 10, color: { argb: "FFFFFFFF" } };
@@ -70,23 +132,37 @@ export async function exportAttendanceToExcel(params: {
   // Set Column Widths
   sheet.columns = [
     { key: "tanggal", width: 20 },
-    { key: "nama", width: 26 },
-    { key: "target_masuk", width: 14 },
-    { key: "target_keluar", width: 14 },
-    { key: "aktual_wfa", width: 15 },
-    { key: "jam_keluar", width: 14 },
+    { key: "nama", width: 25 },
+    { key: "target_masuk", width: 13 },
+    { key: "target_keluar", width: 13 },
+    { key: "aktual_wfa", width: 14 },
+    { key: "jam_keluar", width: 13 },
     { key: "keterangan", width: 32 },
     { key: "daily_activity", width: 45 },
-    { key: "link_lampiran", width: 26 },
+    { key: "bukti_lampiran", width: 28 },
   ];
 
-  rows.forEach((row) => {
+  // Pre-fetch all attachment images in parallel so export is fast
+  const attachmentImages = await Promise.all(
+    rows.map(async (row) => {
+      const url = row.log?.attachment_url;
+      if (!url) return null;
+      return await fetchImageForExcel(url);
+    })
+  );
+
+  const appendixItems: {
+    row: DayRecapRow;
+    imgData: { buffer: ArrayBuffer; extension: "jpeg" | "png" };
+  }[] = [];
+
+  rows.forEach((row, index) => {
     const { log, isWeekend, dayName, formattedDate } = row;
 
     let aktualWfa = "-";
     let jamKeluar = "-";
-    let targetMasukCell = isWeekend && !log ? "-" : targetIn;
-    let targetKeluarCell = isWeekend && !log ? "-" : targetOut;
+    const targetMasukCell = isWeekend && !log ? "-" : targetIn;
+    const targetKeluarCell = isWeekend && !log ? "-" : targetOut;
 
     if (!log) {
       if (isWeekend) {
@@ -109,6 +185,15 @@ export async function exportAttendanceToExcel(params: {
     const keterangan = getRowKeterangan(row, targetIn, targetOut);
     const activity = log?.daily_activity || (isWeekend && !log ? "WEEKEND" : "-");
     const attachmentUrl = log?.attachment_url || "";
+    const imgData = attachmentImages[index];
+
+    let lampiranCellText = "-";
+    if (attachmentUrl && !imgData) {
+      // e.g. PDF document
+      lampiranCellText = "Dokumen PDF Terlampir";
+    } else if (imgData) {
+      lampiranCellText = ""; // Will be filled with embedded image
+    }
 
     const excelRow = sheet.addRow([
       `${dayName}, ${formattedDate}`,
@@ -119,8 +204,16 @@ export async function exportAttendanceToExcel(params: {
       jamKeluar,
       keterangan,
       activity,
-      attachmentUrl ? "Lihat Lampiran" : "-",
+      lampiranCellText,
     ]);
+
+    const rowNumber = excelRow.number;
+
+    if (imgData) {
+      // Set row height tall enough so the physical printed thumbnail is clearly visible
+      excelRow.height = 95;
+      appendixItems.push({ row, imgData });
+    }
 
     excelRow.eachCell((cell, colNumber) => {
       cell.font = {
@@ -133,7 +226,7 @@ export async function exportAttendanceToExcel(params: {
         cell.fill = {
           type: "pattern",
           pattern: "solid",
-          fgColor: { argb: log ? "FFE2E8F0" : "FFF1F5F9" }, // Grey highlight for weekend
+          fgColor: { argb: log ? "FFE2E8F0" : "FFF1F5F9" },
         };
       }
 
@@ -144,27 +237,108 @@ export async function exportAttendanceToExcel(params: {
         right: { style: "thin", color: { argb: "FFE2E8F0" } },
       };
 
-      if ([3, 4, 5, 6].includes(colNumber)) {
-        cell.alignment = { vertical: "top", horizontal: "center" };
+      if ([3, 4, 5, 6, 9].includes(colNumber)) {
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
       } else {
         cell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
       }
     });
 
-    // Add clickable hyperlink if attachment exists
-    if (attachmentUrl) {
-      const linkCell = excelRow.getCell(9);
-      linkCell.value = {
-        text: "Buka Bukti Lampiran",
-        hyperlink: attachmentUrl,
-      };
-      linkCell.font = {
-        size: 10,
-        color: { argb: "FF2563EB" },
-        underline: true,
-      };
+    // Embed actual image inside Column I (col index 8 in 0-based)
+    if (imgData) {
+      const imageId = workbook.addImage({
+        buffer: imgData.buffer,
+        extension: imgData.extension,
+      });
+
+      sheet.addImage(imageId, {
+        tl: { col: 8.08, row: rowNumber - 1 + 0.08 },
+        ext: { width: 175, height: 110 },
+        editAs: "oneCell",
+      });
     }
   });
+
+  // Also add a dedicated "Lampiran Bukti (Cetak)" worksheet with large images for physical printing
+  if (appendixItems.length > 0) {
+    const appSheet = workbook.addWorksheet("Lampiran Bukti (Cetak)", {
+      pageSetup: {
+        paperSize: 9, // A4
+        orientation: "portrait",
+        fitToPage: true,
+        fitToWidth: 1,
+        fitToHeight: 0,
+      },
+    });
+
+    appSheet.columns = [
+      { key: "info", width: 38 },
+      { key: "gambar", width: 58 },
+    ];
+
+    appSheet.mergeCells("A1:B1");
+    const appTitle = appSheet.getCell("A1");
+    appTitle.value = `LAMPIRAN BUKTI AKTIVITAS HARIAN - ${profile.full_name.toUpperCase()} (${periodLabel})`;
+    appTitle.font = { bold: true, size: 12, color: { argb: "FF0F172A" } };
+    appSheet.getRow(1).height = 24;
+
+    const appHeader = appSheet.getRow(2);
+    appHeader.values = ["Tanggal & Detail Aktivitas", "Foto / Gambar Bukti Lampiran"];
+    appHeader.height = 24;
+    appHeader.eachCell((cell) => {
+      cell.font = { bold: true, size: 10, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF1E293B" },
+      };
+      cell.alignment = { vertical: "middle", horizontal: "center" };
+    });
+
+    appendixItems.forEach(({ row, imgData }) => {
+      const { dayName, formattedDate, log } = row;
+      const modeInfo =
+        log?.work_mode === "WFO"
+          ? `WFO (${formatTimeShort(log.check_in)} - ${formatTimeShort(log.check_out)})`
+          : log?.work_mode || "-";
+
+      const detailText = [
+        `Tanggal: ${dayName}, ${formattedDate}`,
+        `Mode: ${modeInfo}`,
+        log?.notes ? `Keterangan: ${log.notes}` : null,
+        "",
+        "Daily Activity:",
+        log?.daily_activity || "-",
+      ]
+        .filter((x) => x !== null)
+        .join("\n");
+
+      const itemRow = appSheet.addRow([detailText, ""]);
+      itemRow.height = 210;
+
+      itemRow.eachCell((cell) => {
+        cell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+        cell.font = { size: 10, color: { argb: "FF0F172A" } };
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFCBD5E1" } },
+          left: { style: "thin", color: { argb: "FFCBD5E1" } },
+          bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+          right: { style: "thin", color: { argb: "FFCBD5E1" } },
+        };
+      });
+
+      const imgId = workbook.addImage({
+        buffer: imgData.buffer,
+        extension: imgData.extension,
+      });
+
+      appSheet.addImage(imgId, {
+        tl: { col: 1.05, row: itemRow.number - 1 + 0.05 },
+        ext: { width: 360, height: 250 },
+        editAs: "oneCell",
+      });
+    });
+  }
 
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
