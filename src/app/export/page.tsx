@@ -339,10 +339,7 @@ function ExportContent() {
           {/* Document Header */}
           <div className="border-b-2 border-slate-900 pb-4 mb-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">
-                TMT GROUP &bull; WORKSPACE LOGBOOK
-              </p>
-              <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight mt-0.5">
+              <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
                 REKAPITULASI PRESENSI & DAILY LOGBOOK
               </h2>
             </div>
@@ -363,7 +360,7 @@ function ExportContent() {
           </div>
 
           {/* Employee Metadata Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
             <div>
               <span className="text-slate-500 block">Nama Lengkap</span>
               <strong className="text-slate-900 text-sm">
@@ -377,13 +374,7 @@ function ExportContent() {
               </strong>
             </div>
             <div>
-              <span className="text-slate-500 block">Target Jam Kerja</span>
-              <strong className="text-slate-900 text-sm">
-                {targetIn} - {targetOut}
-              </strong>
-            </div>
-            <div>
-              <span className="text-slate-500 block">Approver</span>
+              <span className="text-slate-500 block">User</span>
               <strong className="text-slate-900 text-sm">
                 {activeApprover.name}
               </strong>
